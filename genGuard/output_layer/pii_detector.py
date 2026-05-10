@@ -86,11 +86,10 @@ class PIIDetector:
         self.nlp = None
         self.presidio_analyzer = None
         self.presidio_anonymizer = None
+        self.logger = logging.getLogger(__name__)
 
         self._init_engines()
         self._init_custom_patterns()
-
-        self.logger = logging.getLogger(__name__)
 
     def _init_engines(self) -> None:
         """Initialize Presidio and spaCy engines."""
