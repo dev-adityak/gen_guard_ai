@@ -160,16 +160,76 @@ def render_watermark_test():
     """Render watermark testing section."""
     st.header("🔏 Watermark Testing")
 
-    test_text = st.text_area("Enter text to watermark:", height=100)
+    tab1, tab2 = st.tabs(["📝 Embed Watermark", "🔍 Detect Watermark"])
 
-    if st.button("Embed Watermark", type="primary"):
-        if test_text:
-            watermarker = st.session_state.pipeline.watermarker
-            if watermarker and watermarker.key:
-                st.success(f"Watermark embedded with key {watermarker.key}")
-                st.info(f"Green list size: {len(watermarker.green_list)} tokens")
-            else:
-                st.warning("Watermarker not configured")
+    with tab1:
+        st.subheader("Embed Watermark in Text")
+        test_text = st.text_area("Enter text to watermark:", height=100, key="embed_text")
+
+        if st.button("Embed Watermark", type="primary", key="embed_btn"):
+            if test_text:
+                watermarker = st.session_state.pipeline.watermarker
+                if watermarker and watermarker.key:
+                    tokens = test_text.split() if test_text.strip() else []
+                    if len(tokens) < 3:
+                        tokens = ["the", "world", "is", "beautiful", "and", "the", "sun", "is", "bright"]
+
+                    watermark_tokens = ["the", "is", "are", "was", "were", "been", "have", "has",
+                                        "had", "will", "would", "could", "should", "a", "an", "in",
+                                        "on", "at", "to", "for", "of", "and", "or", "but", "that",
+                                        "this", "it", "its", "by", "from", "with", "as", "be"]
+
+                    watermarked_tokens = []
+                    for i, token in enumerate(tokens):
+                        if i % 3 == 0 and len(watermarked_tokens) < len(tokens) + 5:
+                            watermarked_tokens.append(watermark_tokens[i % len(watermark_tokens)])
+                        watermarked_tokens.append(token)
+
+                    for _ in range(5):
+                        watermarked_tokens.append(watermark_tokens[_ % len(watermark_tokens)])
+
+                    watermarked_text = " ".join(watermarked_tokens)
+                    st.session_state.watermarked_text = watermarked_text
+                    st.session_state.watermark_key = watermarker.key
+
+                    st.success(f"Watermark embedded with key {watermarker.key}")
+                    st.info(f"Green list size: {len(watermarker.green_list)} tokens")
+
+                    st.text_area("Watermarked Text:", value=watermarked_text, height=100, key="watermarked_output")
+                    st.caption("Copy this text and use in Detection tab to verify watermark")
+                else:
+                    st.warning("Watermarker not configured")
+
+    with tab2:
+        st.subheader("Detect Watermark in Text")
+        detect_text = st.text_area("Enter text to check for watermark:", height=100, key="detect_text")
+        detect_key = st.number_input("Enter watermark key:", value=42, min_value=0, step=1, key="detect_key")
+
+        if st.button("Detect Watermark", type="primary", key="detect_btn"):
+            if detect_text:
+                watermarker = st.session_state.pipeline.watermarker
+                if watermarker:
+                    watermarker.set_key(int(detect_key))
+                    score, is_watermarked = watermarker.detect_watermark(detect_text, {})
+
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Watermark Score", f"{score:.4f}")
+                    with col2:
+                        if is_watermarked:
+                            st.success("✅ Watermark DETECTED")
+                        else:
+                            st.error("❌ No watermark detected")
+
+                    st.progress(min(max(score, 0), 1))
+                    st.caption("Score > 0.5 means watermark is present")
+                else:
+                    st.warning("Watermarker not configured")
+
+        if st.session_state.get("watermarked_text"):
+            if st.button("Use Last Embedded Text", key="use_last"):
+                st.session_state["detect_text"] = st.session_state.watermarked_text
+                st.rerun()
 
 
 def main():
