@@ -4,6 +4,7 @@ Combines all layers into a single processing pipeline.
 """
 
 import logging
+import torch
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
 
