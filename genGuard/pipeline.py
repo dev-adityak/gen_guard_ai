@@ -18,10 +18,13 @@ from .output_layer.redaction_engine import RedactionEngine, RedactionResult
 
 from .model_layer.watermarker import GumbelWatermarker, WatermarkConfig
 from .model_layer.model_quantizer import ModelQuantizer
+from .model_loader import ModelLoader, ModelLoadingError
 
 from .monitoring.attack_simulator import AttackSimulator
 from .monitoring.audit_logger import AuditLogger
 from .monitoring.privacy_health import PrivacyHealthMonitor
+
+from .exceptions import ModelNotLoadedError, PipelineError
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +38,8 @@ class PipelineConfig:
     enable_monitoring: bool = True
     privacy_budget: float = 8.0
     watermark_key: Optional[int] = None
+    model_name: Optional[str] = None
+    load_model: bool = False
 
 
 class GenGuardPipeline:
@@ -57,6 +62,11 @@ class GenGuardPipeline:
         self.config = config or PipelineConfig()
         self.model = model
         self.tokenizer = tokenizer
+        self.model_loader = ModelLoader()
+        self._simulated_mode = False
+        
+        if self.config.load_model and self.config.model_name:
+            self._load_real_model()
 
         self._init_components()
         logger.info("GenGuard-AI Pipeline initialized")
@@ -101,6 +111,72 @@ class GenGuardPipeline:
         self.health_monitor = PrivacyHealthMonitor(
             target_epsilon=self.config.privacy_budget
         )
+
+    def _load_real_model(self) -> bool:
+        """Load real LLM model."""
+        try:
+            model_name = self.config.model_name or "Qwen/Qwen2-0.5B-Instruct"
+            logger.info(f"Loading real model: {model_name}")
+            self.model, self.tokenizer = self.model_loader.load(
+                model_name=model_name,
+                load_in_4bit=True
+            )
+            self.attack_simulator = AttackSimulator(
+                model=self.model,
+                tokenizer=self.tokenizer
+            )
+            logger.info(f"Real model loaded successfully: {model_name}")
+            self._simulated_mode = False
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to load real model, using simulated mode: {e}")
+            self._simulated_mode = True
+            return False
+
+    def generate_text(self, prompt: str, max_new_tokens: int = 100) -> str:
+        """
+        Generate text using the LLM model.
+        
+        Args:
+            prompt: Input prompt
+            max_new_tokens: Maximum tokens to generate
+            
+        Returns:
+            Generated text
+        """
+        if self._simulated_mode or self.model is None:
+            return self._simulate_generation(prompt)
+        
+        try:
+            inputs = self.tokenizer(prompt, return_tensors="pt")
+            if torch.cuda.is_available():
+                inputs = {k: v.cuda() for k, v in inputs.items()}
+            
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens,
+                    temperature=0.7,
+                    top_p=0.9,
+                    do_sample=True
+                )
+            
+            generated = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            return generated[len(prompt):].strip()
+            
+        except Exception as e:
+            logger.error(f"Text generation failed: {e}")
+            return self._simulate_generation(prompt)
+
+    def _simulate_generation(self, prompt: str) -> str:
+        """Simulate text generation when model is not available."""
+        import random
+        responses = [
+            f"This is a simulated response to: {prompt[:50]}...",
+            f"Based on your input '{prompt[:30]}', here is the processed result.",
+            f"Response generated (simulated mode): {prompt[:20]}...",
+        ]
+        return random.choice(responses)
 
     def process_output(
         self,
